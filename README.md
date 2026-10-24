@@ -1,158 +1,210 @@
-# QTC / EQTC 圧力投影研究 — 全体案内と再現手順
+# QTC Pressure Projection Lab
 
-2026-10-24、最新のκ地図研究（K1〜K17）と4種類の速度測定・判定を含む保存版です。
+Reproducible QTC/EQTC-inspired pressure-projection experiments exploring vertical Galerkin reduction, basis placement, error mechanisms, and solver performance.
 
-この研究で扱っているのは、**共通の細格子上で、圧力を鉛直の区分線形基底へGalerkin縮約する、静的な単発圧力投影の代理実験**です。原QTC/EQTCの水平四分木、minimal/virtual-face離散化、移流、水面追跡、飛沫、時間発展を一式実装したものではありません。新規性の判定も行っていません。
+**Research snapshot: October 24, 2026 (JST).** The saved work covers E0–E7 and the subsequent mechanism studies through K17. Measurements, judgments, failed attempts, and verification records have been preserved. The next research steps listed below have not been run.
 
-目的は「計算現象の理解7割、軽量化3割」。自由度を減らしたことと、必要な精度を保って総計算時間を短くしたことを区別します。失敗、精度未達、予測の不合格、探索的な発見も保存しています。
+The central question is: **when pressure degrees of freedom are reduced, what changes in the solution, why does it change, and does the complete computation actually become faster?** The emphasis is on understanding the numerical behavior before making performance claims.
 
-## まず読むもの
+## Scope
 
-1. **最新の成果・限界**：[最新検証のまとめ](docs/QTC-最新検証.md)
-2. **導出と実験の本文**：[κ地図研究レポート](outputs/eqtc-e7-kappa-map/κ地図研究レポート.md)（§00が最新のまとめ、§11が速度測定）
-3. **研究を再開する場合**：[最新の引き継ぎ](outputs/eqtc-e7-kappa-map/引き継ぎ.md)
-4. **保存された場を見比べる**：[E7比較ビューアー](outputs/eqtc-depth-placement-lab/index.html)、[E6残差診断](outputs/eqtc-residual-analysis/index.html)、[E4比較](outputs/eqtc-stepped-bed-lab/index.html)
-
-HTMLは保存結果の表示です。開くだけで求解や計時を再実行することはありません。
-
-## 現時点の到達点
-
-- 1列・追加節点1個の更新式を厳密に導き、直接求解で検算しました。圧力の誤差エネルギーが減っても、残差の二乗・発散が増える条件を分離できました。
-- 3Dで独立列近似がよく合っていた理由には、水平の遮蔽と段差近傍のスピルが打ち消し合う効果があります。両方を含めるW予測を未使用条件で検証しました。スピル係数は現在も経験値です。
-- 入力右辺だけを使う配置（IC）に加え、基準残差から配置を選ぶRSEを検証しました。一般の台地・二方向の棚でも改善しますが、探索した最良側の配置と常に一致するわけではありません。
-- y方向に一様な底などの条件では縮約系を厳密に分解して速く解けます。一般の底への前処理も試しました。**E4での精度付き総費用は高速化未達のまま**で、後の限定された縮約系・E7パイプラインの改善とは、比較対象と計時範囲が異なります。
-
-### 最新4測定
-
-比は「候補時間 ÷ 比較対象時間」で、小さいほど速い値です。下表の中央値だけで合否を決めず、事前固定した各入力の規則で判定しています。
-
-| 測定 | 比較と主な観測 | 事前判定 |
-|---|---|---|
-| K7：縮約系 | y余弦解法／従来縮約CG。新規準備ありの比の中央値0.421、再利用0.035 | 新規準備のT1は最大0.506で不合格。再利用T2・品質T3は合格 |
-| K10b：全工程 | 高速な中点配置パイプライン／E7基準。補正8回の比の中央値0.480 | 品質Q1〜Q3合格、速度T1・選択費用T2は不合格。元K10の格子不一致も保存 |
-| K13：一般の底 | 平底の代用行列による前処理／縮約CG。新規準備の比の中央値0.649、再利用0.374 | 速度T1・T4は不合格。反復数T2・品質T3は合格 |
-| K16：二段RSE | 基準求解→RSE選択→最終求解／E7中点基準。補正8回の時間比の中央値0.711、誤差E比0.581 | R1〜R3はすべて合格。幾何表の構築約3.5秒は計時外 |
-
-これらは同じ機械・今回の入力集合・単一スレッドBLASでの観測です。K7の再利用比を全工程の速度比とは扱いません。細格子の最速法や原EQTC全体への優位性、長時間の体積保存は主張しません。詳しい比較対象、範囲、最大値と例外は[最新検証](docs/QTC-最新検証.md)を参照してください。
-
-## 実験の流れ
-
-| 段階 | 問いと結果 | 一次資料 |
-|---|---|---|
-| E0：入口 | Galerkin代理の数学・境界・独立検算。静水21/21合格、擾乱の縮約72設定は精度未達 | [結果](outputs/eqtc-fluid-lab/結果.txt)、[README](outputs/eqtc-fluid-lab/README.txt) |
-| E1：層厚校正 | 参照を使うオフライン校正。表層では縮約が残る一方、深部は全基底へ回復する例がある | [結果](outputs/eqtc-thickness-lab/結果.txt) |
-| E2：参照不要の自動選択 | 未使用24件の精度は合格。縮約14・fine復帰10だが、選択を含む全費用は短縮せず | [結果](outputs/eqtc-auto-layer-lab/結果.txt) |
-| E3：最初の候補を予測 | 主方式は細格子CG比0.938で宣言合格。ただし矩形のfine-DCT直接法がさらに速い | [結果](outputs/eqtc-predict-layer-lab/結果.txt) |
-| E4：段差・台地・二方向棚 | 42入力×5方式の最終精度合格。主24入力の総時間は最速の試験済み細格子法比1.121で高速化未達 | [結果](outputs/eqtc-stepped-bed-lab/結果.txt)、[監査](outputs/eqtc-stepped-bed-lab/verification/checks.json) |
-| E5：縮約行列の直接構築 | 同じ基底でRAPと直接構築の同等性を検証。今回の直接COO実装はRAPより遅い | [結果](outputs/eqtc-direct-break-lab/結果.txt) |
-| E6：細格子Jacobi補正 | 52保存解・260計時。0回で精度未達の例が、最大8回で全品質合格へ転じた例は0 | [結果](outputs/eqtc-postsmooth-lab/結果.txt) |
-| E6残差診断 | 保存場の空間・スペクトル後処理。深部の表せない成分を可視化し、配置の問いへ進んだ | [診断](outputs/eqtc-residual-analysis/診断と次の実験.txt) |
-| E7：深部の節点配置 | 同じ自由度の19層より深部中点追加が全8比較で低い誤差E。ただし総時間短縮は未達、深部精度も基準未達 | [最終報告](outputs/eqtc-depth-placement-final-report.txt)、[比較](outputs/eqtc-depth-placement-lab/index.html) |
-| E7機構解析 | 誤差E、残差、発散、Jacobi、物理量の定義と恒等式を調べた | [レポート](outputs/eqtc-e7-mechanism-analysis/E7機構解析レポート.md) |
-| 節点オフセット掃引 | 置き場所によってEと発散が異なる変化をする条件を探索した | [レポート](outputs/eqtc-e7-knot-offset-sweep/節点オフセット掃引レポート.md) |
-| 位相機構追試 | 事前予測、位相・列種別・相互作用、独立検算を進めた。初期解釈には訂正がある | [本文](outputs/eqtc-e7-phase-mechanism/E7追試レポート.md)、[訂正表](outputs/eqtc-e7-phase-mechanism/00_訂正表.md) |
-| κ地図研究：最新 | 1D厳密式→未知条件の予測→3D機構→RSE配置と解法。K1〜K17で一区切り | [本文](outputs/eqtc-e7-kappa-map/κ地図研究レポート.md)、[引き継ぎ](outputs/eqtc-e7-kappa-map/引き継ぎ.md) |
-
-古いレポートの「次の実験は未実施」は、その保存時点の記述です。原資料を改変せず、進行と訂正をこの案内で接続しています。参考ログの役割は[研究経緯](docs/QTC-研究経緯.md)に記載しています。
-
-## 再現用ZIPの内容
-
-配布ファイル名：`qtc-research-2026-10-24.zip`。開発ワークスペースでは `outputs/qtc-research-delivery-2026-10-24/` にZIP、SHA-256、検証記録を置きます。
+These are **static, single-step pressure-projection proxy experiments** on a common fine grid. Pressure is represented using vertically piecewise-linear basis functions, with different choices of vertical knots:
 
 ```text
-qtc-research-2026-10-24/
-  README.md
-  docs/                         最新結果と研究経緯
-  requirements-qtc.txt          数値依存の固定版
-  .eqtc-e4-deps/                Windows x64 / CPython 3.12用の数値依存
-  scripts/qtc_repro/            共通の検証・実行・再梱包コマンド
-  bundle-manifest.json          全収録ファイルのサイズとSHA-256
-  outputs/
-    eqtc-fluid-lab/             E0
-    ...                        E1〜E7、診断、機構解析、掃引
-    eqtc-e7-phase-mechanism/    位相機構追試
-    eqtc-e7-kappa-map/          最新研究、失敗履歴、再開情報
+Fine-grid system:       A p = b
+Reduced representation: p ≈ P q
+Galerkin system:        (Pᵀ A P) q = Pᵀ b
 ```
 
-入力、参照解、生のNPZ、宣言、ソース、探索・不合格・中断記録、レポート、既存の検証記録を収録します。旧ZIPとその展開・stagingの重複、別プロジェクト、実行キャッシュ、会話ログ全体は収録しません。E0〜E4などの由来照合が兄弟フォルダーを参照するため、`outputs/`の構造を保ってください。
+Here, `P` interpolates reduced pressure coefficients onto the fine grid. The later mechanism studies use grids of approximately `32 × 32 × 48` cells and examine flat, stepped, platform, and terraced bottoms.
 
-### 1. ZIPを確認して展開する
+This repository studies an approximation inspired by QTC/EQTC. It does **not** implement the complete original methods: horizontal quadtrees, minimal/virtual-face discretization, advection, moving free surfaces, splashes, and time evolution are outside the tested scope. Novelty relative to prior work has not been established.
 
-Windows PowerShellで、ZIPと`.sha256`を同じ場所に保存して実行します。
+## Main findings so far
+
+- **Lower pressure-error energy does not guarantee lower divergence.** An exact one-column update analysis separates the conditions under which adding a knot reduces energy error but increases the squared residual.
+- **Horizontal coupling matters.** Screening and spill near a bottom step can partly cancel, explaining why an independent-column approximation appeared accurate in some earlier cases. A composite predictor was tested on previously unused conditions and additional bottom geometries; its spill coefficient remains empirical.
+- **Residual-based placement often improves on fixed geometric placement in the tested cases.** The RSE rule uses a baseline reduced solution and a screened Schur approximation to select knots without consulting a fine-grid reference solution. It still misses some of the best placements found by search.
+- **Some reduced solves and E7 pipelines became faster against their stated baselines.** Several strict timing predictions nevertheless failed. The earlier E4 comparison against the fastest tested fine-grid method still did not achieve a total-cost speedup.
+
+## Experimental progress
+
+| Stage | Question and recorded outcome |
+|---|---|
+| [E0: initial proxy](outputs/eqtc-fluid-lab/README.txt) | Mathematical and boundary checks with independent audits. Hydrostatic cases passed 21/21; perturbed reduced configurations failed the accuracy gates in all 72 cases. |
+| [E1: layer calibration](outputs/eqtc-thickness-lab/README.txt) | Offline calibration using reference solutions. Some surface-dominated cases retained reduction; some deep inputs required recovery of the full basis. |
+| [E2: automatic selection](outputs/eqtc-auto-layer-lab/README.txt) | All 24 held-out inputs met the accuracy rules: 14 used reduction and 10 fell back to the fine grid. Total cost, including selection, was not reduced. |
+| [E3: predicting an initial candidate](outputs/eqtc-predict-layer-lab/README.txt) | The main method met its declared comparison against fine-grid CG, with a time ratio of 0.938. A fine-grid DCT direct solver for the rectangular domain was faster still. |
+| [E4: more varied bottoms](outputs/eqtc-stepped-bed-lab/README.txt) | All 42 inputs × 5 methods met the final accuracy gates. For the primary 24-input batch, the aggregate total-time ratio against the fastest tested fine-grid method was 1.121 (median ratio over five rounds): the speedup target was not met. |
+| [E5: direct reduced-matrix assembly](outputs/eqtc-direct-break-lab/README.txt) | Direct assembly and `Pᵀ A P` were checked for equivalence. This direct COO implementation was slower. |
+| [E6: fine-grid Jacobi correction](outputs/eqtc-postsmooth-lab/README.txt) | Across 52 saved solutions and 260 timings, none of the cases failing accuracy at zero corrections was brought through every quality gate by up to eight corrections. |
+| [E7: deep-knot placement](outputs/eqtc-depth-placement-final-report.txt) | Adding a deep midpoint knot gave lower error energy than the equal-DOF top19 basis in all eight original comparisons. Deep-input accuracy gates and total-time targets remained unmet. |
+| [Mechanism and phase studies](outputs/eqtc-e7-phase-mechanism/E7追試レポート.md) | Examined energy, divergence, input phase, knot offsets, and correction behavior. Some initial explanations were refuted or corrected. |
+| [K1–K17: κ maps, placement, and solvers](outputs/eqtc-e7-kappa-map/κ地図研究レポート.md) | Exact 1D updates, tests of 3D predictions, interactions between column types, input-dependent placement, and four timing studies. Selected results are summarized below. |
+
+Historical reports remain available as records of what was known at each stage. Later findings and corrections take precedence over earlier interpretations.
+
+## Latest timing results
+
+All ratios below are **candidate time / comparator time**; smaller values mean shorter times. Measurements used the same machine, single-threaded BLAS, and seven rounds with shuffled execution order. Each declared case was judged using the median of its within-round ratios. The table summarizes those per-case values; it does not give confidence intervals or cross-machine guarantees.
+
+`k0` and `k8` mean zero and eight fine-grid Jacobi corrections, respectively. `IC` denotes independent-column knot placement; `mid` denotes a deep midpoint knot. `top18` and `top19` are the saved baseline vertical-basis configurations.
+
+| Study and comparison | Recorded time ratios | Outcome under the frozen rules |
+|---|---|---|
+| **K7: reduced-system solve.** y-cosine solver / E7 reduced CG. Includes reduced-matrix assembly for a fresh setup, solver preparation, solve, and interpolation. Excludes construction of `P` and the rest of the projection pipeline. | Fresh median **0.421**, range 0.324–0.506. Reuse median **0.035**, range 0.030–0.055. | Fresh-setup T1 **FAIL**: the maximum exceeded 0.5. Reuse T2 and solution-agreement T3 **PASS**. |
+| **K10b: projection pipeline.** `fast_mid / e7_mid`, including grid, right-hand side, basis, solve, correction, velocity reconstruction, and checks. | Median **0.463** at k0 and **0.480** at k8; maximum **0.557**. | Equivalence/improvement checks Q1–Q3 **PASS**. Timing T1 and IC-selection cost T2 **FAIL**. The original K10 stopped because of an incorrect reference grid; K10b is the corrected experiment. |
+| **K13: flat-surrogate preconditioning on varied bottoms.** `flat_pcg / e7_cg`, including reduced-matrix assembly, preconditioner preparation, solve, and interpolation. | Fresh median **0.649**, range 0.511–0.916. Reuse median **0.374**, range 0.226–0.726. | Fresh timing T1 and reuse timing T4 **FAIL**. Iteration-count T2 and reduced-solution agreement T3 **PASS**. |
+| **K16: two-stage RSE pipeline.** Solve top18, select knots using RSE, then solve the selected basis; `rse2 / e7_mid` at k8. | Median **0.711**, range 0.573–0.755. Median error-energy ratio **0.581**; energy improved on **7/8** inputs. | R1–R3 **PASS**. Approximately **3.5 seconds of geometry-table construction are excluded**, as are reference solves. |
+
+Important qualifications:
+
+- K7's y-cosine solver requires bottom geometry and knots to be invariant in the y direction, with equal knot counts across columns. Its reuse ratio is not a complete-pipeline ratio.
+- K10b's Q checks establish numerical equivalence and relative energy improvement. They do not establish that the deep-input accuracy gates from E7 have been met. Likewise, K13's solution agreement concerns the reduced system, not the accuracy of that approximation against the fine grid.
+- K16's energy rule required improvement on at least 75% of inputs; it did **not** require a 75% reduction in energy error. One input became slightly worse, with an energy ratio of approximately 1.011.
+- K16 was slower than the optimized fixed-midpoint pipeline: `rse2 / fast_mid` had a median of **1.47**, within the declared per-input limit of 2.2. Its speed result is against E7's midpoint-plus-CG baseline.
+- Absolute baseline times differed between studies. Use ratios from within each study; do not combine timings from separate runs into a new speedup claim.
+
+The later E7 comparisons use different baselines and timing boundaries from E4. They do not overturn E4's unmet total-cost speedup target against the fastest tested fine-grid method.
+
+Primary judgments: [K7](outputs/eqtc-e7-kappa-map/k7_reduced_solve/results/judgement.json), [K10b](outputs/eqtc-e7-kappa-map/k10b_pipeline/results/judgement.json), [K13](outputs/eqtc-e7-kappa-map/k13_flat_precond/results/judgement.json), and [K16](outputs/eqtc-e7-kappa-map/k16_rse_pipeline/results/judgement.json). Each stage also retains its declaration and case-level results.
+
+## Mechanism and placement results
+
+**Exact update analysis.** The one-column analysis derives the correction caused by adding one knot and checks it against direct solutions. It distinguishes pressure-error energy from the change in squared residual. On the uniform-volume grid, the residual is proportional to the remaining velocity divergence:
+
+```text
+E = (p − p_ref)ᵀ A (p − p_ref)
+r = b − A p
+W = ||r_new||² − ||r_top18||²
+```
+
+`W > 0` means a larger squared residual. For exact Galerkin solves in nested spaces, enlarging the space cannot increase `E` before fine-grid corrections. There is no corresponding guarantee for `W`, for rankings after Jacobi correction, or for runtime.
+
+**Predicting W in 3D.** The composite model combines screened horizontal modes, an independent-column contribution, and a step-edge spill term. In [K11](outputs/eqtc-e7-kappa-map/k11_w_composite/results/judgement.json), it achieved correlation **0.969** and regression slope **1.03** on new conditions. Transferring the model without refitting the spill coefficient to platform and terraced bottoms in [K17](outputs/eqtc-e7-kappa-map/k17_w_general/results/judgement.json) gave pooled correlation **0.926**, slope **0.905**, and relative RMS error **0.383**; all three declared predictions passed. The spill coefficient, approximately **0.0281**, is empirical. The composite was not best on every geometry: the independent-column model alone had lower RMS error on the terraced subset.
+
+**Choosing knots without a reference solve.** RSE selects knots from a baseline reduced solution's residual using a screened Schur approximation. In [K14](outputs/eqtc-e7-kappa-map/k14_rse_placement/results/judgement.json), **88.9% of 36 new inputs** were within 5% of the best error energy found by the candidate search. In [K15](outputs/eqtc-e7-kappa-map/k15_rse_general/results/judgement.json), median gaps were **2.7%** for platform bottoms and **1.5%** for terraces, but **25% of inputs exceeded a 5% gap**. The terraces search used an approximate oracle, not a proven global optimum.
+
+## Verification and prepared artifacts
+
+The following are **recorded results from the October 24 verification of the full snapshot**.
+
+| Artifact | Size | Purpose |
+|---|---|---|
+| `qtc-research-2026-10-24.zip` | 2,822,234,028 bytes, approximately **2.82 GB** | Full numerical snapshot: source, inputs, reference solutions, raw arrays, declarations, judgments, reports, verification tools, and numerical dependencies. |
+| `qtc-light-2026-10-24.zip` | 1,353,264 bytes, approximately **1.35 MB** | Reading, review, and handoff package. It omits raw numerical data, complete source code, numerical dependencies, and HTML viewers. |
+| `QTC_AI_BRIEF.md` | 37,127 bytes, approximately **37 KB** | A consolidated reading brief in the lightweight delivery folder. It is not a numerical reproduction package. |
+
+The full snapshot verification recorded:
+
+- **5,315 manifest-listed payload files** with matching sizes and SHA-256 hashes; 5,316 ZIP members including the manifest.
+- **11/11 verification tasks passed** in a clean Windows x64 / CPython 3.12.14 environment, explicitly loading the bundled NumPy, SciPy, and PyAMG packages.
+- E0–E7 saved-array audits, residual-analysis manifest checks, selected phase-study recomputations, and selected κ-study numerical and figure recomputations.
+- An unchanged extracted tree before and after verification, and preservation checks against the original source artifacts.
+
+**Verification PASS means that the specified integrity checks, audits, and selected recomputations succeeded. It does not mean that all research hypotheses, accuracy gates, or timing targets passed.** This verification did not rerun every experiment, every condition, every benchmark, or all browser QA. Mechanism-analysis and knot-offset-sweep artifacts received full-package hash checks, without exhaustive recomputation of their conditions.
+
+The lightweight package separately passed file-integrity checks for **143 payload files**. Its numerical verification JSONs are retained records from the full snapshot, not numerical reruns performed from the lightweight package.
+
+Full ZIP SHA-256:
+
+```text
+63c148becfcf0c52dea4c43ea992487c65ec22b42f916406fbeba164da5306a4
+```
+
+See the [full delivery record](outputs/qtc-research-delivery-2026-10-24/DELIVERY.md), [recorded numerical checks](outputs/qtc-research-delivery-2026-10-24/verification-release/numeric/checks.json), and [lightweight package notes](outputs/qtc-research-light-2026-10-24/README.md). These relative links follow the saved project layout; the archive names above identify the prepared distributions.
+
+## Reproducing the recorded checks
+
+### 1. Use a fresh, unchanged full-snapshot extraction
+
+The commands in this section target **the full ZIP**, which includes `bundle-manifest.json` and the required numerical packages. They are not generic verification commands for an arbitrary repository checkout or for the lightweight package.
+
+The recorded environment was:
+
+```text
+Windows x64
+CPython 3.12.14
+NumPy 2.3.5
+SciPy 1.16.3
+PyAMG 5.3.0
+```
+
+Python itself is not bundled. The included numerical binaries target Windows x64 / CPython 3.12; other platforms and Python versions have not been validated by this distribution.
+
+Place the full ZIP and its `.sha256` sidecar in the same directory. In PowerShell, using a new extraction destination:
 
 ```powershell
-$zipPath = '.\qtc-research-2026-10-24.zip'
-$expected = ((Get-Content -LiteralPath ($zipPath + '.sha256')).Split(' ')[0]).ToLowerInvariant()
-$actual = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
-if ($actual -ne $expected) { throw 'ZIP SHA-256 mismatch' }
-Expand-Archive -LiteralPath $zipPath -DestinationPath '.\qtc-extracted'
+$archivePath = '.\qtc-research-2026-10-24.zip'
+$expectedSha = ((Get-Content -LiteralPath ($archivePath + '.sha256')).Split(' ')[0]).ToLowerInvariant()
+$actualSha = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actualSha -ne $expectedSha) { throw 'ZIP SHA-256 mismatch' }
+
+Expand-Archive -LiteralPath $archivePath -DestinationPath '.\qtc-extracted'
 Set-Location '.\qtc-extracted\qtc-research-2026-10-24'
 ```
 
-新しい展開先を使ってください。ZIPにはPythonインタープリターは含めていません。
+Keep this extraction unchanged, including its original README. Adding this English README or any other unlisted file to that tree causes the strict manifest check to fail. Use a separate working copy for edits or new experiments.
 
-### 2. 保存結果を検算する（推奨の入口）
+### 2. Run the common verifier
 
-確認した環境は **Windows x64 / CPython 3.12.14**、NumPy 2.3.5、SciPy 1.16.3、PyAMG 5.3.0です。数値パッケージを同梱しているため、この環境では追加インストールやネット接続は不要です。
+From the extracted snapshot root:
 
 ```powershell
 py -3.12 -I -B -S scripts/qtc_repro/verify_bundle.py --out ..\qtc-check
 ```
 
-`py`ランチャーがなければ、`py -3.12`をPython 3.12実行ファイルへのパスに置き換えます。`-I -B -S`でユーザー環境・site-packages・キャッシュ生成から切り離し、展開した依存を明示的に読みます。各検証JSONに実際のパッケージの読込元を記録します。
+The verifier writes reports and logs to a **new sibling directory** outside the snapshot. It refuses an existing output directory. If the Windows `py` launcher is unavailable, replace `py -3.12` with the path to a Python 3.12 executable.
 
-このコマンドは、全ファイルのSHA照合、E0〜E7の保存配列の監査、残差診断manifest照合、位相追試の選択した段の再計算、最新κ研究の宣言・主要数値・図の再生成を順番に実行します。結果は別フォルダーの `checks.json` と各段のJSON・ログに保存します。元の展開物が変わっていないことも再照合します。
+On the recorded platform, this command uses the bundled numerical dependencies and needs no package installation or network connection. It took approximately **313 seconds** in the saved verification run; runtime will vary. Installing packages into a separate virtual environment does not replace the bundled dependencies expected by this isolated verification command.
 
-共通入口は元の研究ソースを変更せず呼び出します。位相追試では、移動先で変わる依存フォルダーなどの環境情報`env`を数値JSONの比較から分離し、旧・新の環境を別項目に記録します。NumPy/SciPy版とスレッド設定の一致、すべての対象数値とraw配列の一致は別に検査します。子プロセスにも同梱依存の起動補助を適用します。
-
-これは**全実験・全計時の最初からの再実行ではありません**。機構解析・オフセット掃引の全条件の再計算、当時のブラウザーQAの再実行も含みません。各検査の範囲は検証JSONに残します。全体検証は数分以上かかる場合があります。
+Optional narrower checks, each with a separate new output directory:
 
 ```powershell
-# 数値計算をせず収録ファイルだけ照合
+# File integrity only; no numerical checks.
 py -3.12 -I -B -S scripts/qtc_repro/verify_bundle.py --checks hashes --out ..\qtc-hash-check
 
-# 最新研究だけを再検算（全ファイル照合も実行）
+# File integrity plus the selected latest κ-study checks.
 py -3.12 -I -B -S scripts/qtc_repro/verify_bundle.py --checks E7-kappa --out ..\qtc-kappa-check
 ```
 
-既存の `checks.json` を読むこと、SHAが一致すること、数値を再計算して一致すること、仮説が合格することは別の確認です。速度閾値に不合格があっても、保存された結果の監査は合格し得ます。
+The lightweight package has a separate file-integrity command. Run it from that package's extracted root:
 
-### 3. 実験を最初から再計算する
-
-**参照用の展開物とは別の作業コピーを作り**、各段のREADMEと最新の引き継ぎに従って実行します。全条件の再計時は今回の納品時にはやり直していません。K12だけでも元の実行では約64分かかっており、全系列の再実行時間は未見積もりです。
-
-旧スクリプトを隔離モードで実行するための補助入口：
-
-```powershell
-# 別コピーのルートで。例：小モデルの既存selfcheckを実行
-py -3.12 -I -B -S scripts/qtc_repro/run_script.py outputs/eqtc-depth-placement-lab/run.py --selfcheck
+```text
+python -I -B CHECK_CONTENTS.py
 ```
 
-`run_script.py`はスクリプトのフォルダーと同梱依存をimport先に加えるだけで、判定規則を変更しません。元スクリプトに書込処理がある場合は、その処理を実行します。
+This lightweight check does not perform numerical reproduction.
 
-- E0〜E5：各段のREADMEに従い、新しい作業コピーで計測してください。旧CLIの監査は`checks.json`を上書きするため、保存版では上記の共通検証入口を使います。
-- E6/E7：各段の`reproduce.py`・`run.py --out <新しい名前>`とREADMEを参照してください。既存の観測フォルダーに上書きしない構成です。
-- κ研究：各`k*/run.py`が宣言・依存ソースのハッシュを確認し、`results/`が既存なら拒否します。作業コピー内だけで旧`results/`を別名へ退避し、対象の`run.py`と`judge.py`を実行します。失敗したK1/K4/K6/K10は、修正版K1b/K4b/K6b/K10bと区別してください。
-- 再計時：他の重い計算を止めた状態で、固定した入力・規則・単一スレッド設定を維持して実行します。絶対秒数の一致は保証しません。新しい測定として保存します。
+### 3. Rerun experiments in a separate working copy
 
-同梱バイナリーはWindows/CPython 3.12用です。他OS・Python版では、別コピーで対応する数値依存を用意する必要があり、この配布での動作検証対象外です。PDFや旧SVGレポートを再生成する場合は追加でReportLab 4.4.9が必要です。保存HTML/SVGの閲覧と上記の数値検証には不要です。
+Follow the relevant stage README, declaration, and [κ-study handoff notes](outputs/eqtc-e7-kappa-map/引き継ぎ.md). Preserve the `outputs/` directory relationships because some historical audits refer to sibling experiments.
 
-ブラウザーQA用の一部スクリプトには作者環境のChrome/Playwrightへの絶対パスがあります。別機での自動QAには設定変更が必要です。元ソースのハッシュを保つため、今回の配布では書き換えていません。
+The common verifier audits saved results and recomputes selected quantities; it does not regenerate all original solves and timings. For full reruns, retain the frozen inputs, thresholds, source versions, and single-thread settings. Run timing experiments one at a time and save new measurements separately. The κ-stage runners reject changed declared dependencies and existing `results/` directories; archive those results under another name only in the working copy before rerunning.
 
-## 指標の読み方と、残っている問い
+The complete experiment series was not rerun during packaging, and its total runtime has not been estimated. Historical PDF/report regeneration may additionally require ReportLab 4.4.9. Some historical browser-QA scripts retain author-specific browser paths and need configuration on another machine.
 
-`E = (p−p_ref)ᵀA(p−p_ref)`は、条件をそろえた速度のM重み誤差に対応します。通常の残差二乗や、相対発散とは異なる評価です。最新研究の`W = ‖r_new‖²−‖r_18‖²`は正なら残差二乗が増えた意味です。`κ`は比なので分母が小さい所で巨大化し、巨大なκだけでは実害の大きさを判断できません。
+## Current limitations and open questions
 
-各段の定義、符号、単位、境界条件、参照残差を参照してください。静的投影の誤差から長時間の体積減少・散逸・不安定性を断定しません。
+- **Scope:** the observations concern the saved static inputs and declared experiments. They do not establish long-term stability, volume conservation, behavior under advection, moving-surface performance, or superiority of a complete QTC/EQTC simulator.
+- **Accuracy:** smaller error energy, fewer degrees of freedom, a smaller reduced-system residual, and fewer iterations are different outcomes. None alone establishes acceptable fine-grid velocity and divergence errors.
+- **Performance:** first-use preparation, reuse, reduced solves, and the complete pipeline have different costs. K16 excludes geometry-table preparation, and several other timing targets failed despite improved medians.
+- **Mechanisms:** the spill coefficient lacks a theoretical derivation; shallow-step failures and input-family-dependent interaction scales remain unresolved.
+- **Placement:** RSE approximates coupling between column types. Its selected knots are not always as good as the best searched candidates, and some oracle comparisons are themselves approximate.
+- **Corrected interpretations:** a geometric midpoint is not universally better than top19. A later phase test found cases with about 1.05 times top19's energy error. Earlier explanations concerning bottom-zero columns and Jacobi's removal of worsening were also revised. See the [correction record](outputs/eqtc-e7-phase-mechanism/00_訂正表.md) and the latest κ report.
 
-未解決事項には、段差スピル係数の理論値、入力族で相互作用の換算係数が違う理由、RSEの種別間結合の近似誤差、前処理の最悪例があります。[引き継ぎ](outputs/eqtc-e7-kappa-map/引き継ぎ.md)に次回の候補と再開コマンドを保存しています。**今回は新しい研究へ進まず、測定・判定・保存を終えて待機しています。**
+Proposed next steps are to include coupling between column types in RSE, improve the flat-surrogate preconditioner, derive the spill coefficient, and evaluate reuse across successive projections. These are research proposals, not completed results.
 
-## 配布を作り直す場合
+## Reading the evidence
 
-`scripts/qtc_repro/catalog.py`が対象フォルダーを明示します。`build_bundle.py`は既存成果物を変更せず、新しいZIPへ固定順序・固定日時で収録し、全ファイルのmanifestとZIPのSHA-256を作ります。既存のZIPは上書きしません。
+Detailed historical reports are mostly in Japanese. Useful entry points are:
 
-```powershell
-py -3.12 -I -B -S scripts/qtc_repro/build_bundle.py --root . --numpy-site .\.eqtc-e4-deps --out ..\qtc-rebuilt.zip
-```
+- [Latest verification and result summary](docs/QTC-最新検証.md)
+- [Full κ-map research report](outputs/eqtc-e7-kappa-map/κ地図研究レポート.md)
+- [Research state and restart notes](outputs/eqtc-e7-kappa-map/引き継ぎ.md)
+- [Research history](docs/QTC-研究経緯.md)
+- Saved-result viewers: [E7 placement comparison](outputs/eqtc-depth-placement-lab/index.html), [E6 residual diagnosis](outputs/eqtc-residual-analysis/index.html), and [E4 comparison](outputs/eqtc-stepped-bed-lab/index.html)
 
-配布ZIPからの再梱包ではNumPyも`.eqtc-e4-deps`にあるため上記指定を使います。開発環境では`--numpy-site`にNumPy 2.3.5とその`.libs`・`.dist-info`のあるフォルダーを指定します。OS・圧縮実装が違う場合のZIPバイト一致は検証していません。データの同一性はmanifestとSHAで確認してください。
+The HTML viewers display saved results; opening them does not rerun solves or benchmarks. Use a local browser for these files; repository source previews do not execute the viewers.
+
+For numerical claims, prioritize each stage's frozen declarations, raw observations, result files, and judgment JSONs. Undeclared explorations are labeled separately in the research reports. Failed predictions, interrupted attempts, and superseded explanations remain part of the research record.
